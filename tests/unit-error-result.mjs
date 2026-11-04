@@ -102,6 +102,28 @@ describe("a rate-limited failure", () => {
 		assert.deepStrictEqual(c.turnOutput.content.filter(b => b.type === "text"), []);
 	});
 
+	it("classifies older Claude subscription notices without rate_limit_event", async () => {
+		for (const text of [
+			"You're out of extra usage · resets 6:30pm",
+			"You've hit your session limit · resets in 2 hours",
+		]) {
+			const c = makeCtx();
+			await consume(c, [
+				{ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] } },
+				{ type: "result", subtype: "success", is_error: true, result: text },
+			]);
+			assert.match(c.turnOutput.errorMessage, /Claude quota exceeded — rate limit/);
+			assert.deepStrictEqual(c.turnOutput.content.filter(b => b.type === "text"), []);
+		}
+	});
+
+	it("classifies a quota result even if no synthetic assistant message arrives", async () => {
+		const c = makeCtx();
+		await consume(c, [limitResult]);
+		assert.match(c.turnOutput.errorMessage, RATE_LIMIT);
+		assert.deepStrictEqual(c.turnOutput.content.filter(b => b.type === "text"), []);
+	});
+
 	it("labels only the failure it caused, not a later one", async () => {
 		const c = makeCtx();
 		await consume(c, [rejection, limitResult]);

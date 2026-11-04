@@ -520,6 +520,13 @@ function resultErrorText(message: SDKMessage): string | undefined {
 	return `Claude Code failed: ${result.subtype ?? "unknown result"}`;
 }
 
+// Older SDK/Claude Code versions sometimes omit rate_limit_event on exhausted
+// subscription windows. Recognize known first-party quota notices, not arbitrary
+// error text, so OMP can distinguish a spent allowance from unrelated failures.
+function isSubscriptionQuotaNotice(text: string): boolean {
+	return /(?:you're out of extra usage|you've hit your session limit|you(?:'ve| have) reached your (?:usage|session) limit|claude quota exceeded|claude (?:rate|usage) limit)/i.test(text);
+}
+
 /** Name a failure as a rate limit when a rejection preceded it.
  *
  *  pi has no typed rate-limit error — `stopReason` is only ever `"error"` and the sole carrier
@@ -1436,7 +1443,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 				// OMP refuses retry.fallbackChains if the errored assistant has text.
 				// A rejected subscription window is already explained by errorMessage;
 				// keep its synthetic notice out of the committed message content.
-				if (!c.rateLimitRejection) c.turnBlocks.push({ type: "text", text: block.text });
+				if (!c.rateLimitRejection && !isSubscriptionQuotaNotice(block.text)) c.turnBlocks.push({ type: "text", text: block.text });
 				else debug("processAssistantMessage: discarding quota synthetic text for OMP fallback");
 			} else debug("processAssistantMessage: unhandled <synthetic> block type", block.type);
 		}
@@ -1559,6 +1566,8 @@ async function consumeQuery(
 				if (queryCtx.rateLimitRejection) {
 					resultError = describeRateLimitFailure(queryCtx.rateLimitRejection, resultError);
 					queryCtx.rateLimitRejection = null;
+				} else if (isSubscriptionQuotaNotice(resultError)) {
+					resultError = describeRateLimitFailure({}, resultError);
 				}
 				debug(`consumeQuery: error result, subtype=${message.subtype}, error=${resultError}`);
 				if (queryCtx.turnOutput && queryCtx.currentPiStream) {

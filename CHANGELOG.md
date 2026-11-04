@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2-omp.2] - 2026-11-04
+
+### Fixed
+- Adapt OMP private-use glyph-token encoding during system-prompt capture and Claude Code projection, based on Laurens Bosscher's original fix (commit 9236fce).
+- Handle exhausted Claude Code subscription notices that arrive without `rate_limit_event`, while preserving fallback behavior for explicit five-hour rejections.
+
+### Verification
+- 47 unit suites and 383 tests.
+- Controlled OMP CLI smoke covers the standard provider path, private-use glyphs, and three quota-fallback message formats without real Claude API requests.
+- Live OMP 18.16.0 pilot exercised concurrent task subagents, OMP hook denial, repeated automatic compaction with reduced threshold, and abort/recovery of a slow bash tool. This does not guarantee all 200K/1M limits or account policies.
+- See [expanded pilot report](documentation/pilot-expanded-2026-11-04.md).
+
 ## [Unreleased]
 
 ### Changed

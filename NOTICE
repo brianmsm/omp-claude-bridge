@@ -27,5 +27,15 @@ Derivative work
     - Synchronized the original runtime through 2026-10-23 (6aa276a), adapting
       prompt blocks, native schemas, lifecycle and summary routing to OMP 18.13.2.
 
+Additional contributions
+------------------------
+  OMP glyph token compatibility:
+  Copyright (c) 2026 Laurens Bosscher
+  https://github.com/LaurensBosscher/omp-claude-bridge/commit/9236fcef201b12a99e8c26a3ee3e760ba85df34d
+
+  Maintained pilot fork, quota fallback and regression tests:
+  Copyright (c) 2026 Brian Norman Peña Calero
+  https://github.com/brianmsm/omp-claude-bridge
+
 The original MIT copyright notice is retained in the LICENSE file, as required
 by the MIT License.

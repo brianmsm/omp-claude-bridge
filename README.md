@@ -6,12 +6,14 @@ An [Oh My Pi](https://github.com/can1357/oh-my-pi) extension that integrates Cla
 
 This port incorporates [pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge) through **2026-10-23**, commit [`6aa276a`](https://github.com/elidickinson/pi-claude-bridge/commit/6aa276a1498e5376363f5c1f8cf04bfcaee38c93). See [port details and migration notes](documentation/upstream-sync-2026-10-23.md).
 
+This is a maintained experimental fork based on [DevVig PR #12](https://github.com/DevVig/omp-claude-bridge/pull/12), with OMP quota-fallback repairs and [Laurens Bosscher's glyph-token compatibility fix](https://github.com/LaurensBosscher/omp-claude-bridge/commit/9236fcef201b12a99e8c26a3ee3e760ba85df34d). It is not an official release of DevVig's port or the original Pi bridge.
+
 ## Install
 
-Requires **OMP >=18.13.2**, **Bun >=1.4.4**, and a working Claude Code login on the machine running OMP. Validation currently targets OMP 18.13.2.
+Requires **OMP >=18.13.2**, **Bun >=1.4.4**, and a working Claude Code login on the machine running OMP. Local pilot validation targets OMP 18.16.0; CI also exercises the pinned OMP development dependency.
 
 ```bash
-omp install https://github.com/DevVig/omp-claude-bridge
+omp plugin install 'https://github.com/brianmsm/omp-claude-bridge#v0.8.2-omp.2'
 ```
 
 For a local checkout:
