@@ -1430,8 +1430,13 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 		if (c.turnSawStreamEvent && c.turnStreamOpen) dropAbandonedStreamBlocks(c, "synthetic failure report");
 		debug(`processAssistantMessage: <synthetic> message, keeping ${assistantMsg.content.length} block(s) off the stream`);
 		for (const block of assistantMsg.content) {
-			if (block.type === "text" && block.text) c.turnBlocks.push({ type: "text", text: block.text });
-			else debug("processAssistantMessage: unhandled <synthetic> block type", block.type);
+			if (block.type === "text" && block.text) {
+				// OMP refuses retry.fallbackChains if the errored assistant has text.
+				// A rejected subscription window is already explained by errorMessage;
+				// keep its synthetic notice out of the committed message content.
+				if (!c.rateLimitRejection) c.turnBlocks.push({ type: "text", text: block.text });
+				else debug("processAssistantMessage: discarding quota synthetic text for OMP fallback");
+			} else debug("processAssistantMessage: unhandled <synthetic> block type", block.type);
 		}
 		if (assistantMsg.usage && c.turnOutput) recordUsage(c.turnOutput, assistantMsg.usage, model);
 		return;

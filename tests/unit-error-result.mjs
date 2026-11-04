@@ -91,6 +91,17 @@ describe("a rate-limited failure", () => {
 		assert.ok(c.turnOutput.errorMessage.includes("five_hour"));
 	});
 
+	it("keeps a rejected-quota synthetic notice out of OMP output so fallback can run", async () => {
+		const c = makeCtx();
+		await consume(c, [
+			rejection,
+			{ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: limitResult.result }] } },
+			limitResult,
+		]);
+		assert.match(c.turnOutput.errorMessage, RATE_LIMIT);
+		assert.deepStrictEqual(c.turnOutput.content.filter(b => b.type === "text"), []);
+	});
+
 	it("labels only the failure it caused, not a later one", async () => {
 		const c = makeCtx();
 		await consume(c, [rejection, limitResult]);
