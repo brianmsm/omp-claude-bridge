@@ -1,6 +1,6 @@
 {
 	"name": "omp-claude-bridge",
-	"version": "0.8.1",
+	"version": "0.8.2-omp.1",
 	"private": false,
 	"description": "Oh My Pi extension that integrates Claude Code via the Claude Agent SDK, with OMP tools, session continuity and selectable context windows.",
 	"keywords": [
@@ -17,13 +17,13 @@
 		"Eli Dickinson (original pi-claude-bridge author, https://github.com/elidickinson)"
 	],
 	"license": "MIT",
-	"homepage": "https://github.com/DevVig/omp-claude-bridge#readme",
+	"homepage": "https://github.com/brianmsm/omp-claude-bridge#readme",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/DevVig/omp-claude-bridge.git"
+		"url": "git+https://github.com/brianmsm/omp-claude-bridge.git"
 	},
 	"bugs": {
-		"url": "https://github.com/DevVig/omp-claude-bridge/issues"
+		"url": "https://github.com/brianmsm/omp-claude-bridge/issues"
 	},
 	"engines": {
 		"node": ">=20",

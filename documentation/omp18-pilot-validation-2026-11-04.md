@@ -1,6 +1,6 @@
 # OMP bridge compatibility pilot
 
-Date: 2026-11-04. Branch: `maint/omp18-pr12-quota-fix-20261104`.
+Date: 2026-11-04. Branch: `maint/omp18-pr12-quota-fix-20261104`. Pilot version: `0.8.2-omp.1`. Maintained fork: https://github.com/brianmsm/omp-claude-bridge.
 
 ## Provenance and upstreams
 
