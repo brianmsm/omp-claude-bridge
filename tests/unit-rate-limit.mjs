@@ -3,6 +3,7 @@
  */
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { authorizeMockTool } from "./lib/authorize-mock-tool.mjs";
 import { readFileSync } from "node:fs";
 import { QueryContext } from "../src/query-state.js";
 import { rateLimitResponse } from "../src/rate-limit.js";
@@ -148,6 +149,7 @@ describe("delivery to the provider call that owns the stream", () => {
 			const gen = (async function* () {
 				yield { type: "system", subtype: "init", session_id: "cc-rate-limit" };
 				yield* toolUse("toolu_1");
+				await authorizeMockTool(__test.activeQueryContexts, "toolu_1", "read", { path: "a" });
 				// Claude Code reports usage after message_stop, once the tool call has ended the stream.
 				yield usage(0.05);
 				yield usage(0.1);
@@ -182,6 +184,7 @@ describe("delivery to the provider call that owns the stream", () => {
 			async function* () {
 				yield { type: "system", subtype: "init", session_id: "cc-rate-limit-abort" };
 				yield* toolUse("toolu_1");
+				await authorizeMockTool(__test.activeQueryContexts, "toolu_1", "read", { path: "a" });
 				yield usage(0.1);
 				usageConsumed.open();
 				await closed.wait();

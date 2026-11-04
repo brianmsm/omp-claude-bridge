@@ -16,6 +16,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { QueryContext } from "../src/query-state.js";
+import { approvedSdkStream } from "./lib/approved-sdk-stream.mjs";
 
 const { __test } = await import("../src/index.js");
 
@@ -42,8 +43,7 @@ async function replay(name, { toolNames = ["read"] } = {}) {
 	const customToolNameToPi = new Map(toolNames.map((n) => [`mcp__custom-tools__${n}`, n]));
 
 	const messages = fixture(name);
-	async function* stream() { for (const m of messages) yield m; }
-	const { capturedSessionId } = await __test.consumeQuery(stream(), customToolNameToPi, model, () => false, c);
+	const { capturedSessionId } = await __test.consumeQuery(approvedSdkStream(messages, c, customToolNameToPi), customToolNameToPi, model, () => false, c);
 	return { events, ctx: c, messages, capturedSessionId };
 }
 

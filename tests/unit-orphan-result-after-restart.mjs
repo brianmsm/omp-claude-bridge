@@ -12,6 +12,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { authorizeMockTool } from "./lib/authorize-mock-tool.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +83,13 @@ beforeEach(() => {
 				if (closed) return;
 				if (typeof step === "function") { await step(killed); continue; }
 				yield step;
+				if (step?.type === "stream_event" && step.event?.type === "message_stop" && options.mcpServers) {
+					const proposed = script.steps.find(x => x?.type === "stream_event" && x.event?.type === "content_block_start" && x.event.content_block?.type === "tool_use");
+					const id = proposed?.event?.content_block?.id;
+					if (id && [...activeQueryContexts].some(c => c.toolGate.hasProposed(id))) {
+						await authorizeMockTool(activeQueryContexts, id, "read", { path: "a" });
+					}
+				}
 			}
 		})();
 		gen.interrupt = async () => {};

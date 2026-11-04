@@ -43,7 +43,7 @@ export interface McpToolDef {
 	name: string;
 	description: string;
 	inputSchema: unknown;
-	handler: (toolCallId: string) => Promise<McpResult>;
+	handler: (toolCallId: string, args: Record<string, unknown>) => Promise<McpResult>;
 }
 
 // MCP requires an object schema. Pi types tool parameters as any TypeBox schema,
@@ -161,7 +161,7 @@ export function createToolServer(name: string, tools: McpToolDef[]) {
 		}
 		// Narrowed deliberately: McpResult also carries `toolCallId`, which is our
 		// own bookkeeping for pairing and not part of MCP's CallToolResult.
-		const { content, isError } = await tool.handler(toolCallId);
+		const { content, isError } = await tool.handler(toolCallId, request.params.arguments ?? {});
 		return { content, isError };
 	});
 

@@ -20,6 +20,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { QueryContext } from "../src/query-state.js";
+import { approvedSdkStream } from "./lib/approved-sdk-stream.mjs";
 
 const { __test } = await import("../src/index.js");
 
@@ -41,8 +42,7 @@ function makeCtx() {
 }
 
 async function consume(c, messages) {
-	async function* gen() { for (const m of messages) yield m; }
-	await __test.consumeQuery(gen(), toolMap, fakeModel, () => false, c);
+	await __test.consumeQuery(approvedSdkStream(messages, c, toolMap), toolMap, fakeModel, () => false, c);
 }
 
 const streamEvent = (event) => ({ type: "stream_event", event });

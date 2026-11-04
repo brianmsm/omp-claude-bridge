@@ -10,6 +10,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { authorizeMockTool } from "./lib/authorize-mock-tool.mjs";
 
 const mod = await import("../src/index.js");
 const { setQuery, resetSharedSession, getSharedSession, activeQueryContexts } = mod.__test;
@@ -59,6 +60,9 @@ function parkingQuery(steps, after = async function* () {}) {
 			await prompt[Symbol.asyncIterator]().next();
 			yield { type: "system", subtype: "init", session_id: "cc-finalized" };
 			yield* steps;
+			// The model proposed a tool. Simulate Claude Code approving the
+			// matching MCP tools/call before OMP may execute it.
+			if (steps === toolUse) await authorizeMockTool(activeQueryContexts, "toolu_1", "read", { path: "a" });
 			park();
 			await gate;
 			yield* after();

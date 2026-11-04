@@ -9,6 +9,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { authorizeMockTool } from "./lib/authorize-mock-tool.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +64,7 @@ beforeEach(() => {
 			await prompt[Symbol.asyncIterator]().next();
 			yield init;
 			for (const step of toolUse("toolu_1")) yield step;
+			await authorizeMockTool(activeQueryContexts, "toolu_1", "read", { path: "a" });
 			for (const step of textStart) yield step;
 			await killed;
 		})();
@@ -113,8 +115,10 @@ describe("abort on a run that continues a parked query", () => {
 				await prompt[Symbol.asyncIterator]().next();
 				yield init;
 				for (const step of toolUse("toolu_1")) yield step;
+				await authorizeMockTool(activeQueryContexts, "toolu_1", "read", { path: "a" });
 				await settle(); // the second run picks up the query
 				for (const step of toolUse("toolu_2")) yield step;
+				await authorizeMockTool(activeQueryContexts, "toolu_2", "read", { path: "a" });
 				await new Promise(() => {});
 			})();
 			gen.interrupt = async () => {};

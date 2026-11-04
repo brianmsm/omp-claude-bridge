@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2-omp.3] - 2026-11-04
+
+### Security
+- **Fix:** a model-proposed OMP tool call is no longer executed until Claude Code issues the matching MCP `tools/call` after permission checks. This prevents CC `permissions.deny` and `PreToolUse` rejections from triggering native OMP side effects ([upstream issue #218](https://github.com/elidickinson/pi-claude-bridge/issues/218)).
+- Validate tool-use id, name, and exact argument object; reject stale, duplicate, incomplete, unauthorized, or altered requests. Retain sibling proposals for staggered approvals across OMP tool-result turns.
+
+### Verification
+- 48 unit suites / 395 tests; typecheck and CLI smoke suite.
+- 7 additional controlled-SDK OMP CLI cases: denied, missing approval, allowed, staggered dual approval, mixed deny/allow, argument mismatch, duplicate MCP call.
+- Real Claude Code 2.1.318 / OMP 18.16.0: both `permissions.deny` and `PreToolUse` prevent native OMP write; normal write and staggered dual reads complete.
+- [Security design, limits, and test reproduction](documentation/security-dispatch-gate-2026-11-04.md).
+
 ## [0.8.2-omp.2] - 2026-11-04
 
 ### Fixed

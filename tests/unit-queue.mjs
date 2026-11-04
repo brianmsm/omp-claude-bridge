@@ -64,6 +64,12 @@ const TOOLS = ["alpha", "beta", "gamma"].map((name) => ({
 async function startQuery(turnToolCallIds) {
 	const c = new QueryContext();
 	c.turnToolCallIds = [...turnToolCallIds];
+	// A real model stream proposed and completed these tool blocks. Execution
+	// still requires matching MCP tools/call authorization from Claude Code.
+	for (const [index, id] of turnToolCallIds.entries()) {
+		c.toolGate.stageComplete(id, TOOLS[index].name, index, {});
+	}
+	c.toolGate.finishMessage();
 	const servers = __test.buildMcpServers(TOOLS, c);
 	return { c, callTool: await connectClient(Object.values(servers)[0]) };
 }
@@ -74,14 +80,14 @@ const deliver = (c, ...results) => __test.deliverToolResults(c, results, null, 4
 const replyText = (response) => response.result.content[0].text;
 
 describe("tool result queue", () => {
-	it("hands a handler the result that arrived before it, isError included", async () => {
+	it("rejects a result that arrived before authorization, instead of laundering a stale effect", async () => {
 		const { c, callTool } = await startQuery(["toolu_1"]);
 
-		await deliver(c, result("toolu_1", "early", true));
+		await deliver(c, result("toolu_1", "untrusted early", true));
 		assert.deepEqual([...c.pendingResults.keys()], ["toolu_1"]);
 
 		const response = await callTool("alpha", "toolu_1");
-		assert.equal(replyText(response), "early");
+		assert.match(replyText(response), /Duplicate or stale MCP tool call/);
 		assert.equal(response.result.isError, true);
 		assert.equal(c.pendingResults.size, 0);
 	});
@@ -141,8 +147,9 @@ describe("tool result queue", () => {
 		assert.deepEqual([...c.pendingResults.keys()], ["toolu_2"]);
 		assertDisjoint();
 
-		const two = await callTool("beta", "toolu_2"); // claims it from the queue
-		assert.equal(replyText(two), "r2");
+		const two = await callTool("beta", "toolu_2"); // refuses the queued stale result
+		assert.match(replyText(two), /Duplicate or stale MCP tool call/);
+		assert.equal(two.result.isError, true);
 		assert.equal(c.pendingResults.size, 0);
 		assert.equal(c.pendingToolCalls.size, 0);
 	});

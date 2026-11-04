@@ -1101,16 +1101,27 @@ function buildMcpServers(tools: Tool[], queryCtx: QueryContext): Record<string, 
 		name: tool.name,
 		description: tool.description,
 		inputSchema: tool.parameters,
-		handler: async (toolCallId: string) => {
-			if (queryCtx.pendingResults.has(toolCallId)) {
-				const result = queryCtx.pendingResults.get(toolCallId)!;
-				queryCtx.pendingResults.delete(toolCallId);
-				debug(`mcp handler: ${tool.name} [${toolCallId}] → resolved from queue (${queryCtx.pendingResults.size} remaining)`);
-				return result;
-			}
-			debug(`mcp handler: ${tool.name} [${toolCallId}] → waiting`);
+		handler: async (toolCallId: string, args: Record<string, unknown>) => {
+			// A stream_event tool_use is only a proposal. Claude Code can reject it
+			// locally via permissions.deny / PreToolUse without ever calling MCP.
+			// Only this tools/call handler is proof that CC authorized the exact id,
+			// name AND arguments. Fail closed instead of running such proposals in OMP.
 			return new Promise<McpResult>((resolve) => {
+				if (queryCtx.pendingToolCalls.has(toolCallId) || queryCtx.pendingResults.has(toolCallId)) {
+					// An OMP result cannot legitimately predate CC's MCP authorization.
+					// Discard it rather than laundering a stale result into a new call.
+					queryCtx.pendingResults.delete(toolCallId);
+					resolve({ content: [{ type: "text", text: `Duplicate or stale MCP tool call: ${toolCallId}` }], isError: true });
+					return;
+				}
 				queryCtx.pendingToolCalls.set(toolCallId, { toolName: tool.name, resolve });
+				if (!queryCtx.toolGate.authorize(toolCallId, tool.name, args)) {
+					queryCtx.pendingToolCalls.delete(toolCallId);
+					debug(`mcp handler: rejected unknown, incomplete or mismatched authorization ${tool.name} [${toolCallId}]`);
+					resolve({ content: [{ type: "text", text: `Tool call not authorized for dispatch: ${tool.name}` }], isError: true });
+					return;
+				}
+				debug(`mcp handler: authorized ${tool.name} [${toolCallId}], awaiting OMP execution`);
 			});
 		},
 	}));
@@ -1214,6 +1225,34 @@ function claimCurrentPiStream(stream: AssistantMessageEventStream, label: string
 	c.currentOnResponse = options?.onResponse;
 }
 
+/** The MCP tools/call handler has authorized these exact tool requests. The
+ * model stream alone never enters this function; an SDK-local denial therefore
+ * cannot cause an OMP-side effect. Emit the authorized subset in model order. */
+function dispatchAuthorizedToolBatch(c: QueryContext, calls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>): void {
+	if (!c.currentPiStream || !c.turnOutput || !calls.length) {
+		debug(`tool dispatch gate: no active OMP stream, rejecting ${calls.length} authorizations`);
+		c.releasePendingToolCalls("OMP stream not available for tool dispatch");
+		return;
+	}
+	ensureTurnStarted(c);
+	for (const call of calls) {
+		const toolCall = { type: "toolCall" as const, id: call.id, name: call.name, arguments: mapToolArgs(call.name, call.arguments) };
+		const index = c.turnBlocks.length;
+		c.turnBlocks.push(toolCall);
+		c.turnSawToolCall = true;
+		c.turnToolCallIds.push(call.id);
+		c.currentPiStream.push({ type: "toolcall_start", contentIndex: index, partial: c.turnOutput });
+		c.currentPiStream.push({ type: "toolcall_end", contentIndex: index, toolCall, partial: c.turnOutput });
+	}
+	c.turnOutput.stopReason = "toolUse";
+	const stream = c.currentPiStream;
+	stream.push({ type: "done", reason: "toolUse", message: c.turnOutput });
+	markStreamComplete(stream);
+	stream.end();
+	c.currentPiStream = null;
+	debug(`tool dispatch gate: dispatched ${calls.length} Claude-authorized tool(s) to OMP`);
+}
+
 function ensureTurnStarted(c: QueryContext): void {
 	if (!c.turnStarted && c.currentPiStream && c.turnOutput) {
 		c.currentPiStream!.push({ type: "start", partial: c.turnOutput });
@@ -1254,6 +1293,8 @@ function processStreamEvent(
 		// stream and is retrying it. Its blocks were never completed.
 		if (c.turnStreamOpen) dropAbandonedStreamBlocks(c, `restreamed as ${event.message?.id}`);
 		c.turnToolCallIds = [];
+		c.toolGate.beginMessage();
+		if (event.message?.id) c.streamedMessageIds.add(event.message.id);
 		c.turnStreamMessageId = event.message?.id;
 		c.turnStreamOpen = true;
 		c.turnStreamBlockStart = c.turnBlocks.length;
@@ -1272,17 +1313,12 @@ function processStreamEvent(
 		} else if (event.content_block?.type === "tool_use") {
 			const piName = piToolNameFor(event.content_block.name, customToolNameToPi);
 			if (!piName) {
-				debug(`processStreamEvent: skipping tool_use for unserved tool ${event.content_block.name} [${event.content_block.id}] — CC rejects it and retries`);
+				debug(`processStreamEvent: skipping tool_use for unserved tool ${event.content_block.name} [${event.content_block.id}]`);
 				return;
 			}
-			c.turnToolCallIds.push(event.content_block.id);
-			c.turnBlocks.push({
-				type: "toolCall", id: event.content_block.id,
-				name: piName,
-				arguments: (event.content_block.input as Record<string, unknown>) ?? {},
-				partialJson: "", index: event.index,
-			});
-			c.currentPiStream!.push({ type: "toolcall_start", contentIndex: c.turnBlocks.length - 1, partial: c.turnOutput });
+			// Do NOT append to turnOutput or emit a toolcall_start: Claude Code
+			// may reject this tool locally after streaming its tool_use block.
+			c.toolGate.propose(event.content_block.id, piName, event.index, event.content_block.input);
 		} else {
 			debug("processStreamEvent: unhandled content_block_start type", event.content_block?.type);
 		}
@@ -1290,6 +1326,7 @@ function processStreamEvent(
 	}
 
 	if (event?.type === "content_block_delta") {
+		if (event.delta?.type === "input_json_delta" && c.toolGate.append(event.index, event.delta.partial_json)) return;
 		const index = c.turnBlocks.findIndex((b: any) => b.index === event.index);
 		const block = c.turnBlocks[index];
 		if (!block) return;
@@ -1312,6 +1349,7 @@ function processStreamEvent(
 	}
 
 	if (event?.type === "content_block_stop") {
+		if (c.toolGate.complete(event.index)) return;
 		const index = c.turnBlocks.findIndex((b: any) => b.index === event.index);
 		const block = c.turnBlocks[index];
 		if (!block) return;
@@ -1342,20 +1380,10 @@ function processStreamEvent(
 		c.turnStreamOpen = false;
 	}
 
-	if (event?.type === "message_stop" && c.turnSawToolCall) {
-		// Tool call complete — end this pi stream. The SDK will still yield an
-		// assistant message for this turn, but currentPiStream=null causes
-		// consumeQuery to skip it. The MCP handler blocks the generator until
-		// pi delivers the tool result via the next streamSimple call.
-		c.turnOutput.stopReason = "toolUse";
-		const stream = c.currentPiStream;
-		stream!.push({ type: "done", reason: "toolUse", message: c.turnOutput });
-		markStreamComplete(stream);
-		stream!.end();
-		c.currentPiStream = null;
-
-		// Cursor is updated by the next streamSimple call (tool result delivery path)
-		// which sets cursor = context.messages.length with the post-tool-result context.
+	if (event?.type === "message_stop" && c.toolGate.proposedCount) {
+		// The model's proposal is complete, but CC still has to run its own
+		// permission hooks. Only a matching MCP CallTool may dispatch to OMP.
+		c.toolGate.finishMessage();
 		return;
 	}
 
@@ -1386,6 +1414,7 @@ function dropUnfinishedStreamBlocks(c: QueryContext, why: string): void {
 		dropped.push(`${c.turnBlocks[i].type}${c.turnBlocks[i].id ? `[${c.turnBlocks[i].id}]` : ""}`);
 		c.turnBlocks.splice(i, 1);
 	}
+	c.toolGate.dropIncomplete();
 	if (!dropped.length) return;
 	debug(`dropUnfinishedStreamBlocks: ${why}; dropped ${dropped.reverse().join(",")}`);
 	c.turnToolCallIds = c.turnBlocks.filter((b: any) => b.type === "toolCall").map((b: any) => b.id);
@@ -1401,6 +1430,7 @@ function dropUnfinishedStreamBlocks(c: QueryContext, why: string): void {
  *  pi-agent-core's experimental harness frame encoder keys blocks by contentIndex and
  *  rejects a repeated start, so it would need a change there to drive this provider. */
 function dropAbandonedStreamBlocks(c: QueryContext, why: string): void {
+	c.toolGate.reset();
 	const dropped = c.turnBlocks.splice(c.turnStreamBlockStart);
 	debug(`dropAbandonedStreamBlocks: ${why}; dropped ${dropped.length} blocks from ${c.turnStreamMessageId} types=${dropped.map((b: any) => b.type).join(",")}`);
 	c.turnToolCallIds = [];
@@ -1425,6 +1455,9 @@ function dropAbandonedStreamBlocks(c: QueryContext, why: string): void {
 function processAssistantMessage(message: SDKMessage, model: Model<any>, customToolNameToPi: Map<string, string>, c: QueryContext): void {
 	const assistantMsg = (message as any).message;
 	if (!assistantMsg?.content) return;
+	// A completed SDK assistant message may arrive after an OMP tool-result
+	// continuation has begun. Never re-stage proposals already streamed.
+	if (assistantMsg.id && c.streamedMessageIds.has(assistantMsg.id)) return;
 	// Claude Code reports API failures and its own quota/context notices as a
 	// `<synthetic>` assistant message: a report, not model output. Streaming its text
 	// pins the turn's output before the failure it describes, and a consumer that only
@@ -1459,6 +1492,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 		if (c.turnStreamOpen) dropAbandonedStreamBlocks(c, `non-streaming fallback ${id}`);
 	}
 	c.turnToolCallIds = [];
+	c.toolGate.beginMessage();
 	debug(`processAssistantMessage fallback: ${assistantMsg.content.length} blocks, types=${assistantMsg.content.map((b: any) => b.type).join(",")}`);
 	for (const block of assistantMsg.content) {
 		if (block.type === "text" && block.text) {
@@ -1477,37 +1511,18 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 			c.currentPiStream?.push({ type: "thinking_end", contentIndex: idx, content: block.thinking ?? "", partial: c.turnOutput });
 		} else if (block.type === "tool_use") {
 			const piName = piToolNameFor(block.name, customToolNameToPi);
-			if (!piName) {
-				debug(`processAssistantMessage: skipping tool_use for unserved tool ${block.name} [${block.id}] — CC rejects it and retries`);
-				continue;
-			}
-			ensureTurnStarted(c);
-			c.turnSawToolCall = true;
-			c.turnToolCallIds.push(block.id);
-			c.turnBlocks.push({
-				type: "toolCall", id: block.id,
-				name: piName,
-				arguments: mapToolArgs(piName, block.input),
-			});
-			const idx = c.turnBlocks.length - 1;
-			const toolBlock = c.turnBlocks[idx];
-			c.currentPiStream?.push({ type: "toolcall_start", contentIndex: idx, partial: c.turnOutput });
-			c.currentPiStream?.push({ type: "toolcall_end", contentIndex: idx, toolCall: toolBlock as any, partial: c.turnOutput });
+			if (!piName) continue;
+			// Non-streaming fallback is also a *proposal*, never authority to run.
+			c.toolGate.stageComplete(block.id, piName, c.toolGate.proposedCount, block.input);
 		} else {
 			debug("processAssistantMessage: unhandled block type", block.type);
 		}
 	}
 	if (assistantMsg.usage && c.turnOutput) recordUsage(c.turnOutput, assistantMsg.usage, model);
 
-	// End the stream on tool_use, same as processStreamEvent's message_stop handler.
-	if (c.turnSawToolCall && c.currentPiStream && c.turnOutput) {
-		c.turnOutput.stopReason = "toolUse";
-		const stream = c.currentPiStream;
-		stream.push({ type: "done", reason: "toolUse", message: c.turnOutput });
-		markStreamComplete(stream);
-		stream.end();
-		c.currentPiStream = null;
-	}
+	// Claude Code authorizes this message's tool proposals independently through
+	// MCP tools/call. The stream stays open if its hooks reject every proposal.
+	if (c.toolGate.proposedCount) c.toolGate.finishMessage();
 }
 
 /** Background consumer: iterates the SDK generator, pushing events to currentPiStream.
@@ -1524,6 +1539,9 @@ async function consumeQuery(
 ): Promise<{ capturedSessionId?: string; failure?: Error }> {
 	let capturedSessionId: string | undefined;
 	let failure: Error | undefined;
+	// This dispatcher is reachable only via MCP CallTool authorization receipts,
+	// not by a model-emitted tool_use stream event.
+	queryCtx.toolGate.setDispatcher((calls) => dispatchAuthorizedToolBatch(queryCtx, calls), () => Boolean(queryCtx.currentPiStream));
 
 	for await (const message of sdkQuery) {
 		// CLAUDE_BRIDGE_RECORD_STREAM=<path> appends every SDK message consumeQuery
@@ -1548,6 +1566,16 @@ async function consumeQuery(
 		//   open; once ended, turnOutput is the message pi already recorded.
 		// - rate-limit events: notifications to the user, which are most likely to
 		//   fire during exactly the long tool-using turns the guard was skipping.
+		// Claude Code may reject a proposed tool by recording its own tool_result
+		// without dispatching any MCP tools/call. Such a result must not cause OMP
+		// to execute the proposal; mark it denied and keep waiting for real output.
+		if (message.type === "user") {
+			for (const block of ((message as any).message?.content ?? [])) {
+				if (block?.type === "tool_result" && block.is_error && typeof block.tool_use_id === "string") {
+					queryCtx.toolGate.deny(block.tool_use_id);
+				}
+			}
+		}
 		if (message.type === "user" && message.parent_tool_use_id === null && "isReplay" in message && message.isReplay === true) {
 			// For fresh steer UUIDs, replay marks incorporation into the turn, not
 			// completion. Its MCP calls still need stdin until the following result.
@@ -1871,6 +1899,8 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	if (resultCtx) {
 		claimCurrentPiStream(stream, "tool-result", resultCtx, options);
 		resultCtx.resetTurnState(model);
+		// The next Claude-authorized sibling may use this new OMP stream.
+		resultCtx.toolGate.resume();
 		resultCtx.bindRunSignal?.(options?.signal, stream);
 		// A rewrite that armed the mark after this query parked gets copied here,
 		// though markRebuildForSession usually reaches it directly.

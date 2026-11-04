@@ -11,6 +11,7 @@ import type { AssistantMessage, AssistantMessageEventStream, SimpleStreamOptions
 import type { McpResult } from "./extract-tool-results.js";
 import type { PromptStream } from "./prompt-stream.js";
 import type { RateLimitInfo } from "./rate-limit.js";
+import { ToolDispatchGate } from "./tool-dispatch-gate.js";
 
 export interface PendingToolCall {
 	toolName: string;
@@ -28,11 +29,15 @@ export class QueryContext {
 	heldRateLimit: RateLimitInfo | undefined;
 	latestCursor = 0;
 	pendingToolCalls = new Map<string, PendingToolCall>();
+	/** Tool proposals are NOT executable until Claude Code sends MCP tools/call. */
+	toolGate = new ToolDispatchGate();
 	pendingResults = new Map<string, McpResult>();
 	/** tool_use ids emitted this turn. Sole purpose is routing a delivered result
 	 *  to the owning query when several queries are in flight — pairing a result
 	 *  to its call is done by id from Claude's tools/call _meta, not from here. */
 	turnToolCallIds: string[] = [];
+	/** Model ids whose streamed content was already handled by this query. */
+	streamedMessageIds = new Set<string>();
 	/** Streaming-input handle for the active query — how steers reach CC mid-turn. */
 	promptStream: PromptStream | null = null;
 	/** Steers written or awaiting a write, not yet replayed as incorporated into a turn. */
@@ -92,9 +97,13 @@ export class QueryContext {
 		for (const pending of this.pendingToolCalls.values()) pending.resolve({ content: [{ type: "text", text: reason }] });
 		this.pendingToolCalls.clear();
 		this.pendingResults.clear();
+		this.toolGate.reset();
+		this.streamedMessageIds.clear();
 	}
 
 	resetTurnState(model: Model<any>): void {
+		// The SDK may authorize the second tool *after* OMP has executed the
+		// first. Preserve unapproved proposals across OMP tool-result turns.
 		this.turnOutput = {
 			role: "assistant", content: [],
 			api: model.api, provider: model.provider, model: model.id,

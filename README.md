@@ -13,7 +13,7 @@ This is a maintained experimental fork based on [DevVig PR #12](https://github.c
 Requires **OMP >=18.13.2**, **Bun >=1.4.4**, and a working Claude Code login on the machine running OMP. Local pilot validation targets OMP 18.16.0; CI also exercises the pinned OMP development dependency.
 
 ```bash
-omp plugin install 'https://github.com/brianmsm/omp-claude-bridge#v0.8.2-omp.2'
+omp plugin install 'https://github.com/brianmsm/omp-claude-bridge#v0.8.2-omp.3'
 ```
 
 For a local checkout:
@@ -39,6 +39,12 @@ Models come from OMP's bundled Anthropic catalog, excluding dated snapshot alias
 The picker retains this port's `(1M)` / `(200K)` entries. An unsuffixed id follows `provider.contextWindow`; a suffix such as `claude-opus-4-8-200k` explicitly selects a window. Models with only one supported window use that window even when the configured default requests the other one.
 
 Automatic routing follows upstream's **measured Claude Code mappings**, not the catalog's advertised maximum alone. New, unmeasured models default to 200K. The inherited measurements in [diag/CONTEXT-SIZE.md](diag/CONTEXT-SIZE.md) are upstream results, not a claim that every model was measured again for OMP. Explicit 1M selection requests that runtime; availability and billing still depend on your plan.
+
+## Security and tool permissions
+
+Starting with `v0.8.2-omp.3`, OMP tools are dispatched **only after Claude Code issues a matching MCP tools/call**. Model-streamed `tool_use` blocks are not authorization. This prevents Claude Code `permissions.deny` and `PreToolUse` rejections from causing side effects in OMP, including when OMP is running with `--approval-mode=yolo`. Staggered authorizations and parallel-tool proposals are handled without dropping approved siblings.
+
+This is a coordination boundary, **not a security sandbox**: the check applies only to Claude Code MCP-served OMP tools; always configure **OMP's own approval mode/hooks** and OS-level least privilege before allowing unattended operations. For implementation, tests, and limitations, see [Security dispatch gate](documentation/security-dispatch-gate-2026-11-04.md).
 
 ## Configuration
 
