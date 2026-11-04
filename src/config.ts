@@ -31,6 +31,8 @@ export interface Config {
 		contextWindow?: ContextWindowMode;
 		strictMcpConfig?: boolean;
 		autoMemoryEnabled?: boolean;
+		/** Opt into metered Extra Usage: false (default) ends a query when the SDK reports overage. */
+		allowExtraUsage?: boolean;
 		pathToClaudeCodeExecutable?: string;
 		// Subscription plan tier. Setting to "max" enables Opus 4.6 at 1M context
 		plan?: "pro" | "max";

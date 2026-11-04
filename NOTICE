@@ -33,6 +33,12 @@ Additional contributions
   Copyright (c) 2026 Laurens Bosscher
   https://github.com/LaurensBosscher/omp-claude-bridge/commit/9236fcef201b12a99e8c26a3ee3e760ba85df34d
 
+  Project configuration confinement and billing safety ideas reviewed from:
+  poog26/omp-agent-sdk-bridge
+  Copyright (c) 2026 poog26
+  https://github.com/poog26/omp-agent-sdk-bridge
+  Independently adapted, with tighter monotonic AskClaude restrictions.
+
   Maintained pilot fork, quota fallback and regression tests:
   Copyright (c) 2026 Brian Norman Peña Calero
   https://github.com/brianmsm/omp-claude-bridge

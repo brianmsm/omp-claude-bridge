@@ -1,6 +1,6 @@
 {
 	"name": "omp-claude-bridge",
-	"version": "0.8.2-omp.3",
+	"version": "0.8.2-omp.4",
 	"private": false,
 	"description": "Oh My Pi extension that integrates Claude Code via the Claude Agent SDK, with OMP tools, session continuity and selectable context windows.",
 	"keywords": [
@@ -41,7 +41,7 @@
 		"test": "bun run test:unit",
 		"test:unit": "bun scripts/test-unit.mjs",
 		"typecheck": "tsc --noEmit",
-		"test:smoke": "bun tests/smoke-omp.mjs && bun tests/smoke-omp-glyph.mjs && bun tests/smoke-omp-quota.mjs && bun tests/smoke-omp-authorization.mjs"
+		"test:smoke": "bun tests/smoke-omp.mjs && bun tests/smoke-omp-glyph.mjs && bun tests/smoke-omp-quota.mjs && bun tests/smoke-omp-authorization.mjs && bun tests/smoke-omp-config-billing.mjs && bun tests/smoke-omp-overage-tools.mjs"
 	},
 	"type": "module",
 	"dependencies": {

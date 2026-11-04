@@ -35,6 +35,7 @@ import { forgetSessionCwd, rememberSessionCwd, rememberSummarySession, sessionCw
 import { installOmpSessionRouting, ompSessionFromKey } from "./omp-session-routing.js";
 import { updateUsage, type SdkUsage } from "./usage.js";
 import { rateLimitResponse } from "./rate-limit.js";
+import { billingRouteIndicators, billingRouteNotice, isUsingExtraUsage, EXTRA_USAGE_STOP_MESSAGE } from "./billing-guard.js";
 import { SUMMARIZATION_SYSTEM_PROMPT } from "@oh-my-pi/pi-agent-core/compaction";
 
 // --- Debug logging ---
@@ -604,6 +605,7 @@ async function runIsolatedSummary(
 		const effort = effortForReasoning(model, options?.reasoning);
 		debug(`compact summary: spawn model=${cliModel} registeredModel=${model.id} effort=${effort ?? "default"} promptLen=${promptText.length}`);
 
+		showBillingRouteWarning();
 		sdkQuery = queryImpl({
 			prompt: promptText,
 			options: {
@@ -633,6 +635,7 @@ async function runIsolatedSummary(
 		let finalText = "";
 		let errorText: string | undefined;
 		let firstEventLogged = false;
+		let extraUsageNotified = false;
 
 		for await (const message of sdkQuery) {
 			if (!firstEventLogged) {
@@ -640,6 +643,11 @@ async function runIsolatedSummary(
 				firstEventLogged = true;
 			}
 			if (wasAborted) break;
+			if (message.type === "rate_limit_event" && isUsingExtraUsage((message as any).rate_limit_info)) {
+				const allowed = compactProviderSettings?.allowExtraUsage === true;
+				if (!extraUsageNotified) { showExtraUsageWarning(allowed); extraUsageNotified = true; }
+				if (!allowed) throw new Error(EXTRA_USAGE_STOP_MESSAGE);
+			}
 
 			if (message.type === "assistant") {
 				for (const block of (message as any).message?.content ?? []) {
@@ -888,6 +896,11 @@ export const __test = {
 	setQuery(fn: typeof query | null) {
 		queryImpl = fn ?? query;
 	},
+	/** SDK test hooks: never invoke real user credentials. */
+	setProviderSettings(settings: Config["provider"]) {
+		providerSettings = settings ?? {};
+	},
+	promptAndWait: (...args: Parameters<typeof promptAndWait>) => promptAndWait(...args),
 	resetSharedSession(piSessionId?: string | null) {
 		// No id: full reset (the pre-map semantics — tests start from a blank slate).
 		if (piSessionId === undefined) sharedSessions.clear();
@@ -997,6 +1010,28 @@ const activeQueryContexts = new Set<QueryContext>();
 // has this extension installed. One message, because consecutive info notifies
 // overwrite each other in the TUI.
 let pendingNotices: string[] = [];
+let lastBillingRouteWarning = "";
+
+/** Warn before using inherited Claude Code credentials, never log key values.
+ * A changed routing environment produces a new notice once per signature. */
+function showBillingRouteWarning(): void {
+	const signature = billingRouteIndicators(process.env).join("|");
+	if (!signature) { lastBillingRouteWarning = ""; return; }
+	if (signature === lastBillingRouteWarning) return;
+	lastBillingRouteWarning = signature;
+	const notice = billingRouteNotice(process.env)!;
+	if (piMode === "tui" && piUI) piUI.notify(notice, "warning");
+	else console.error(notice);
+}
+
+/** The same Extra Usage notice applies to provider, AskClaude and summaries. */
+function showExtraUsageWarning(allowed: boolean): void {
+	const notice = allowed
+		? "Claude Code reports paid Extra Usage for this request (explicitly allowed by global provider.allowExtraUsage)."
+		: EXTRA_USAGE_STOP_MESSAGE;
+	if (piMode === "tui" && piUI) piUI.notify(notice, "warning");
+	else console.error(notice);
+}
 
 function showStartupNoticeOnce(): void {
 	// `hasUI` is true in RPC mode too — it means dialogs are possible, not that a
@@ -1614,6 +1649,24 @@ async function consumeQuery(
 			debug("consumeQuery: rate_limit_event", JSON.stringify(info).slice(0, 300));
 			if (info) queryCtx.heldRateLimit = info;
 			await reportHeldRateLimit(queryCtx, model);
+			if (isUsingExtraUsage(info)) {
+				if (!queryCtx.extraUsageNoticeShown) {
+					queryCtx.extraUsageNoticeShown = true;
+					showExtraUsageWarning(providerSettings.allowExtraUsage === true);
+				}
+				if (providerSettings.allowExtraUsage !== true) {
+					// The event may arrive after OMP has closed a tool-use stream.
+					// Abort this query without mutating an already-finalized message;
+					// existing error teardown settles any pending MCP tool calls.
+					queryCtx.promptStream?.end();
+					if (queryCtx.turnOutput && queryCtx.currentPiStream) {
+						queryCtx.turnOutput.stopReason = "error";
+						queryCtx.turnOutput.errorMessage = EXTRA_USAGE_STOP_MESSAGE;
+					}
+					failure = new Error(EXTRA_USAGE_STOP_MESSAGE);
+					break;
+				}
+			}
 			if (info?.status === "rejected") {
 				// Held so the failure Claude Code sends next can be named as a rate limit.
 				queryCtx.rateLimitRejection = info;
@@ -1848,6 +1901,7 @@ function discardRewrittenQuery(c: QueryContext): void {
 /** Provider entry point. Pi calls this for each new prompt and each tool result.
  *  Two cases: tool result delivery (active query) or fresh query. */
 function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {
+	showBillingRouteWarning();
 	showStartupNoticeOnce();
 	// pi hands providers a transcript (prompt/tools folded into system messages) — fold it
 	// back out to the prompt/tools fields every cursor write, syncSharedSession call and
@@ -2412,7 +2466,8 @@ async function promptAndWait(
 	// removes the Skill tool and the listing with it — but AskClaude runs on CC's native
 	// tools, so it has to be asked for. Pi-side skills still arrive via skillsBlock below,
 	// which is meant to be the only channel.
-	const sdkQuery = query({
+	showBillingRouteWarning();
+	const sdkQuery = queryImpl({
 		prompt,
 		options: {
 			cwd,
@@ -2448,11 +2503,17 @@ async function promptAndWait(
 	let sdkMessageCount = 0;
 	let textDeltaCount = 0;
 	let resultSubtype: string | undefined;
+	let extraUsageNotified = false;
 
 	try {
 		for await (const message of sdkQuery) {
 			if (wasAborted) break;
 			sdkMessageCount++;
+			if (message.type === "rate_limit_event" && isUsingExtraUsage((message as any).rate_limit_info)) {
+				const allowed = providerSettings.allowExtraUsage === true;
+				if (!extraUsageNotified) { showExtraUsageWarning(allowed); extraUsageNotified = true; }
+				if (!allowed) throw new Error(EXTRA_USAGE_STOP_MESSAGE);
+			}
 
 			switch (message.type) {
 				case "stream_event": {

@@ -49,6 +49,8 @@ export class QueryContext {
 	/** Last rate-limit rejection seen on this query. Claude Code sends it just before the
 	 *  failure it caused, which is the only thing tying the two together. */
 	rateLimitRejection: { rateLimitType?: string; resetsAt?: number } | null = null;
+	/** Emit at most one Extra Usage warning per live SDK query. */
+	extraUsageNoticeShown = false;
 	/** Highest 5% utilization bucket we notified for, so repeat rate_limit_event spam is suppressed. */
 	lastRateLimitWarnStep: number | null = null;
 	lastRateLimitWarnThreshold: number | undefined;

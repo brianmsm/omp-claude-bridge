@@ -22,6 +22,8 @@ export type RateLimitInfo = {
 	rateLimitType?: string;
 	overageStatus?: string;
 	overageResetsAt?: number;
+	/** Claude Code's authoritative flag that THIS request is using Extra Usage. */
+	isUsingOverage?: boolean;
 	unifiedWindows?: Record<string, UsageWindow | undefined>;
 };
 

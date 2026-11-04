@@ -13,7 +13,7 @@ This is a maintained experimental fork based on [DevVig PR #12](https://github.c
 Requires **OMP >=18.13.2**, **Bun >=1.4.4**, and a working Claude Code login on the machine running OMP. Local pilot validation targets OMP 18.16.0; CI also exercises the pinned OMP development dependency.
 
 ```bash
-omp plugin install 'https://github.com/brianmsm/omp-claude-bridge#v0.8.2-omp.3'
+omp plugin install 'https://github.com/brianmsm/omp-claude-bridge#v0.8.2-omp.4'
 ```
 
 For a local checkout:
@@ -48,7 +48,7 @@ This is a coordination boundary, **not a security sandbox**: the check applies o
 
 ## Configuration
 
-Global: `~/.omp/agent/claude-bridge.json`, following OMP's active profile and agent-directory override. Project: `.omp/claude-bridge.json`, merged over global config.
+Global: `~/.omp/agent/claude-bridge.json`, following OMP's active profile and agent-directory override. **Only this global configuration controls `provider` (executable, SDK security, routing, billing).** A project `.omp/claude-bridge.json` may *restrict* `askClaude` but cannot enable it, broaden `full` access, alter tool names/descriptions or override global notices. Project-level `provider` blocks are ignored with a warning. Move legitimate provider settings to the global file. [Detailed policy and tests](documentation/config-billing-hardening-2026-11-05.md).
 
 ```json
 {
@@ -57,7 +57,8 @@ Global: `~/.omp/agent/claude-bridge.json`, following OMP's active profile and ag
     "contextWindow": "auto",
     "longContextExtraUsage": false,
     "strictMcpConfig": true,
-    "autoMemoryEnabled": false
+    "autoMemoryEnabled": false,
+    "allowExtraUsage": false
   },
   "askClaude": { "enabled": false }
 }
@@ -72,6 +73,7 @@ Global: `~/.omp/agent/claude-bridge.json`, following OMP's active profile and ag
 | `strictMcpConfig` | `true` | Ignore Claude Code's filesystem MCP configuration. Cloud MCP is always disabled for bridge queries. |
 | `autoMemoryEnabled` | `false` | Enable Claude Code's own auto-memory system. |
 | `pathToClaudeCodeExecutable` | SDK default | Override the Claude Code binary path. |
+| `allowExtraUsage` | `false` | Stop a query after the SDK explicitly reports paid Extra Usage; opt in globally with `true`. Cannot undo charges already incurred. |
 
 OMP's rendered prompt blocks are preserved, including loaded project rules, skills, custom prompts, append text and extension instructions. The bridge uses what OMP actually loaded; it does not rediscover files. OMP's `--no-context-files` and `--no-skills` control those sources. Claude Code's own CLAUDE.md/AGENTS.md discovery is suppressed to avoid duplication.
 
@@ -81,7 +83,7 @@ OMP's rendered prompt blocks are preserved, including loaded project rules, skil
 
 The legacy delegation tool is **disabled by default and deprecated** upstream. Set `askClaude.enabled: true` to enable it explicitly. Settings remain `name`, `label`, `description`, `defaultMode` (`read`, `none`, `full`), `defaultIsolated`, `allowFullMode`, and `appendSkills`.
 
-The default mode is `read`. `allowFullMode: false` removes and rejects `full`. Full mode lets Claude Code run its own tools with permissions bypassed.
+The default mode is `read`. **Set `allowFullMode: false` globally** to remove and reject `full`. Full mode lets Claude Code run its own tools with permissions bypassed. A local project can only set `enabled:false`, `allowFullMode:false`, `defaultMode` to an equal-or-less permissive `read`/`none`, `defaultIsolated:true` or `appendSkills:false`. A more permissive project default (such as `none` → `read`) is ignored.
 
 ## Behavior and limitations
 
@@ -90,7 +92,8 @@ The default mode is `read`. `allowFullMode: false` removes and rejects `full`. F
 - OMP and other extensions retain compaction and branch-summary ownership. Their model requests use isolated Claude Code summaries; the live mirror changes after OMP commits the history rewrite.
 - Rebuilds resend history and can lose prompt-cache reuse. Aborts, compaction, tree navigation and errors can trigger a rebuild.
 - Changed system instructions can remain frozen in a resumed Claude Code session until a rebuild. Start a new session when changes must apply immediately.
-- Exported `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` also affect the Claude Code child. Check these when a subscription login unexpectedly uses a gateway or API key.
+- Exported `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and cloud-provider switches can affect Claude Code billing. The bridge **warns without displaying secret values or changing authentication** when inherited routing variables suggest API/cloud/custom-endpoint billing. This is not an account-level spending limit.
+- If Claude Code reports `rate_limit_event.isUsingOverage === true`, the bridge stops provider, AskClaude and isolated summary queries by default. Set global `provider.allowExtraUsage: true` to permit the metered continuation. **Detection is not retroactive**: the current API request may already have been charged; configure Anthropic account credit controls independently. See [billing protections](documentation/config-billing-hardening-2026-11-05.md).
 - Login, SDK availability and subscription limits are requirements on the server running OMP. Mobile clients continue to access OMP through their usual adapter.
 
 ## Debugging

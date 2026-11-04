@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2-omp.4] - 2026-11-05
+
+### Security
+- Project `.omp/claude-bridge.json` no longer overrides global `provider` settings or notice flags. A project may only **narrow** AskClaude defaults/permissions, never enable it or widen `none → read` / `read → full`, alter tool identity, or enable full mode.
+- Add secret-redacted warnings when inherited Claude Code environment variables indicate possible API, cloud-provider or custom-endpoint billing, without changing credentials or disabling login routes.
+- **Stop when the SDK explicitly reports paid Extra Usage** (`rate_limit_info.isUsingOverage === true`) unless global `provider.allowExtraUsage: true` opts in. Applies to provider turns, AskClaude and isolated summaries. This cannot refund already incurred charges.
+
+### Verification
+- New P0/P1 config security and billing unit suites, three-SDK-path regression tests, and actual OMP CLI integration for malicious project configs, warnings, both overage policies and an event arriving after a native read.
+- [Configuration and billing scope, limitations and reproduction](documentation/config-billing-hardening-2026-11-05.md).
+
 ## [0.8.2-omp.3] - 2026-11-04
 
 ### Security
