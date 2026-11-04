@@ -1,8 +1,9 @@
 // User-facing extension config. Loaded once at extension registration from
 // the global agent dir (getAgentDir(), e.g. ~/.omp/agent/claude-bridge.json)
-// and the project Pi config directory, project overriding global. Missing or
-// unparseable files are ignored (error to console.error, empty object
-// returned) so the extension always starts.
+// and the project Pi config directory. Provider configuration (executable,
+// security, SDK routing, billing) is GLOBAL-ONLY. A project may restrict a
+// globally configured AskClaude tool, never enable or widen its permissions.
+// Missing or unparseable files are ignored so the extension still starts.
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -106,13 +107,48 @@ export function markAskClaudeDeprecationNoticeShown(): string {
 	return path;
 }
 
+/** Only a repository's restrict-only AskClaude options may override the user's
+ * global configuration. Never trust project-controlled tool names, descriptions,
+ * executable paths, SDK routing, or full-mode enablement. In particular, a local
+ * default of read cannot raise a globally configured none to read. */
+function plainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function restrictProjectAskClaude(globalAsk: Config["askClaude"], projectAsk: unknown): Config["askClaude"] {
+	const effective = { ...globalAsk };
+	if (!plainObject(projectAsk)) return effective;
+	if (projectAsk.enabled === false) effective.enabled = false;
+	if (projectAsk.allowFullMode === false) effective.allowFullMode = false;
+	if (projectAsk.defaultIsolated === true) effective.defaultIsolated = true;
+	if (projectAsk.appendSkills === false) effective.appendSkills = false;
+
+	const rank: Record<string, number> = { none: 0, read: 1, full: 2 };
+	const originalMode = globalAsk?.defaultMode === "none" || globalAsk?.defaultMode === "full"
+		? globalAsk.defaultMode : "read";
+	const allowedMode = originalMode === "full" && globalAsk?.allowFullMode === false ? "read" : originalMode;
+	const localMode = projectAsk.defaultMode;
+	// Never accept full mode from project config, even when already global.
+	if ((localMode === "read" || localMode === "none") && rank[localMode] <= rank[allowedMode]) {
+		effective.defaultMode = localMode;
+	}
+	return effective;
+}
+
 export function loadConfig(cwd: string): Config {
 	const global = tryParseJson(globalConfigPath());
-	const project = tryParseJson(join(cwd, CONFIG_DIR_NAME, "claude-bridge.json"));
+	const projectPath = join(cwd, CONFIG_DIR_NAME, "claude-bridge.json");
+	const project = tryParseJson(projectPath);
+	const g = plainObject(global) ? global : {};
+	const p = plainObject(project) ? project : {};
+	if (Object.hasOwn(p, "provider")) {
+		console.error(`claude-bridge: ignoring project provider settings in ${projectPath}; only global provider settings are trusted`);
+	}
+	const globalAsk = plainObject(g.askClaude) ? g.askClaude as Config["askClaude"] : {};
 	return {
-		startupNoticeShown: project.startupNoticeShown ?? global.startupNoticeShown,
-		askClaudeDeprecationShown: project.askClaudeDeprecationShown ?? global.askClaudeDeprecationShown,
-		askClaude: { ...global.askClaude, ...project.askClaude },
-		provider: { ...global.provider, ...project.provider },
+		startupNoticeShown: typeof g.startupNoticeShown === "string" ? g.startupNoticeShown : undefined,
+		askClaudeDeprecationShown: typeof g.askClaudeDeprecationShown === "string" ? g.askClaudeDeprecationShown : undefined,
+		askClaude: restrictProjectAskClaude(globalAsk, p.askClaude),
+		provider: plainObject(g.provider) ? { ...g.provider } as Config["provider"] : {},
 	};
 }

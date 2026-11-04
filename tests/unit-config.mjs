@@ -37,7 +37,7 @@ describe("claudeCodeSettings", () => {
 });
 
 describe("loadConfig", () => {
-	it("loads project config from Pi's configured project directory", () => withTempHome(() => {
+	it("loads only restrictive project AskClaude config from Pi's project directory", () => withTempHome(() => {
 		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
 		try {
 			const configDir = join(cwd, CONFIG_DIR_NAME);
@@ -50,7 +50,7 @@ describe("loadConfig", () => {
 			assert.deepEqual(loadConfig(cwd), {
 				startupNoticeShown: undefined,
 				askClaudeDeprecationShown: undefined,
-				provider: { plan: "max" },
+				provider: {},
 				askClaude: { enabled: false },
 			});
 		} finally {
@@ -58,7 +58,7 @@ describe("loadConfig", () => {
 		}
 	}));
 
-	it("merges project config over global config", () => withTempHome((home) => {
+	it("preserves global provider config while project may restrict AskClaude", () => withTempHome((home) => {
 		const cwd = mkdtempSync(join(tmpdir(), "claude-bridge-project-"));
 		try {
 			const globalDir = getAgentDir();
@@ -77,7 +77,7 @@ describe("loadConfig", () => {
 			assert.deepEqual(loadConfig(cwd), {
 				startupNoticeShown: undefined,
 				askClaudeDeprecationShown: undefined,
-				provider: { plan: "max", strictMcpConfig: true, autoMemoryEnabled: true },
+				provider: { plan: "pro", strictMcpConfig: true },
 				askClaude: { enabled: false, defaultMode: "read" },
 			});
 		} finally {
